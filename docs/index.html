@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bug Navigation on the MBot-Omni</title>
+<style>
+  :root { --bg:#fff; --fg:#1b1b1b; --muted:#5a5a5a; --accent:#00274c; --card:#f4f6f8; --border:#dde1e6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111417; --fg:#e8eaed; --muted:#a0a6ad; --accent:#ffcb05; --card:#1b2026; --border:#2b323a; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:820px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { color:var(--accent); font-size:2rem; margin:0 0 .25em; }
+  h2 { margin-top:2em; border-bottom:1px solid var(--border); padding-bottom:.25em; }
+  .sub { color:var(--muted); margin-bottom:2em; }
+  .video { background:var(--card); border:1px dashed var(--border); border-radius:8px; aspect-ratio:16/9;
+           display:flex; align-items:center; justify-content:center; color:var(--muted); text-align:center; padding:16px; }
+  .video iframe, .video video { width:100%; height:100%; border:0; border-radius:8px; }
+  pre { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px; overflow-x:auto; font-size:.9rem; }
+  table { border-collapse:collapse; width:100%; }
+  td, th { border:1px solid var(--border); padding:6px 10px; text-align:left; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bug Navigation on the MBot-Omni</h1>
+  <p class="sub">Project 2 · Autonomous navigation to a goal pose with obstacle avoidance ·
+    <a href="https://github.com/Howard-f35/Bug-Navigation">Source code</a></p>
+
+  <h2>Demo video</h2>
+  <!-- TODO: replace this placeholder with the demo video. Either paste a YouTube embed:
+         <iframe src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen></iframe>
+       or drop an mp4 into docs/ and use:
+         <video controls src="demo.mp4"></video>                                              -->
+  <div class="video">Demo video coming soon: the robot navigating around obstacles to a staff-given goal.</div>
+
+  <h2>What the robot does</h2>
+  <p>The robot is given a goal pose <em>(x, y, θ)</em> in its odometry frame and has to drive there
+    on its own, going around anything in the way. We implemented a <strong>Bug 2</strong> algorithm:
+    drive straight at the goal along the <em>m-line</em>; when the Lidar shows an obstacle in the way,
+    follow the obstacle's boundary; leave the boundary once the robot is back on the m-line and closer
+    to the goal than where it first hit the obstacle. Because the MBot-Omni can move in any direction,
+    the robot translates without turning and only rotates to the goal heading at the very end.</p>
+
+  <h2>State machine</h2>
+  <pre>
+                 blocked                        back on m-line &amp; closer &amp; clear
+ +---------------+ ----------&gt; +-------------+ -------------------------------+
+ | DRIVE_TO_GOAL |             | FOLLOW_WALL |                                |
+ +---------------+ &lt;---------- +-------------+ &lt;------------------------------+
+        |
+        | dist &lt; POS_TOL
+        v
+ +---------------+  |heading err| &lt; ANG_TOL  +----------+
+ | TURN_TO_GOAL  | --------------------------&gt; | AT_GOAL |
+ +---------------+                             +----------+</pre>
+  <table>
+    <tr><th>State</th><th>Behaviour</th></tr>
+    <tr><td>0 · DRIVE_TO_GOAL</td><td>Proportional control on the position error, moving straight at the goal.</td></tr>
+    <tr><td>1 · FOLLOW_WALL</td><td>Project 1 wall follower: travel tangent to the nearest Lidar ray while holding a 0.35 m stand-off.</td></tr>
+    <tr><td>2 · TURN_TO_GOAL</td><td>Rotate in place to the requested heading.</td></tr>
+    <tr><td>3 · AT_GOAL</td><td>Stop and print the final odometry.</td></tr>
+  </table>
+  <p>The state is printed every control iteration together with the pose, the distance to the goal
+    and the shortest Lidar ray toward the goal, so transitions can be verified from the terminal.</p>
+
+  <h2>Detecting obstacles</h2>
+  <p>Checking only the single Lidar ray pointing at the goal misses obstacles that sit just beside
+    that ray. Instead we take the <em>minimum ray inside a 70° slice</em> centred on the goal
+    direction. If that ray is shorter than 0.45 m (and shorter than the distance to the goal, so the
+    object is actually between us and the goal) the goal direction is blocked and the robot switches to
+    wall following. When the robot hits an obstacle it also checks which side of the goal direction the
+    closest ray is on and goes around the other way, so it does not take the long way around.</p>
+
+  <h2>Discussion</h2>
+  <ul>
+    <li><strong>Bug 2 vs. Bug 1.</strong> Bug 1 circles every obstacle completely before leaving at the
+      closest point, which is safe but slow. Bug 2 leaves as soon as the m-line is re-crossed closer to
+      the goal, which gives much shorter paths on the convex boxes used in the demo course.</li>
+    <li><strong>Odometry drift.</strong> Everything is in the odometry frame, so wheel slip during wall
+      following shifts where the robot believes the m-line is. We widened the m-line tolerance and added a
+      fallback leave rule (clear line of sight to the goal and closer than the hit point for several
+      consecutive iterations) so the robot never orbits an obstacle forever.</li>
+    <li><strong>Inside corners.</strong> The wall follower uses the single nearest ray as "the wall". At
+      inside corners the nearest ray jumps from one surface to the next; slowing down when a surface
+      appears in the direction of travel made that hand-off smooth.</li>
+    <li><strong>Testing without the robot.</strong> We wrote a small 2D simulator with ray-cast Lidar
+      (<code>sim/run_sim.py</code>) and ran the exact navigation code against boxes, walls, a corridor and a
+      U-shaped trap. All scenarios reach the goal within 6 cm and 0.08 rad without collisions, and the
+      printed state sequence matches the state machine above.</li>
+  </ul>
+</main>
+</body>
+</html>
