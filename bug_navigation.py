@@ -54,11 +54,11 @@ MIN_ANG_SPEED = 0.25      # Motors stall below this (rad/s).
 
 # Obstacle detection: minimum ray in a slice of the scan centred on the goal.
 GOAL_SLICE = math.radians(70)   # Total width of the slice (rad).
-OBSTACLE_DIST = 0.45            # Blocked if the min ray in the slice is shorter (m).
-CLEAR_DIST = 0.70               # Need this much room toward the goal to leave the wall (m).
+OBSTACLE_DIST = 0.35            # Blocked if the min ray in the slice is shorter (m).
+CLEAR_DIST = 0.55               # Need this much room toward the goal to leave the wall (m).
 
 # Wall following (reused from the Project 1 wall follower).
-WALL_SETPOINT = 0.35            # Distance to keep from the wall (m).
+WALL_SETPOINT = 0.30            # Distance to keep from the wall (m).
 KP_WALL = 1.2                   # Gain on wall-distance error.
 FOLLOW_SPEED = 0.25             # Tangential speed along the wall (m/s).
 MAX_WALL_CORRECTION = 0.20      # Cap on the radial correction speed (m/s).
@@ -68,7 +68,7 @@ SLOW_DOWN_DIST = 0.6            # Slow the tangential speed when a wall is ahead
 # Leaving the wall (Bug 2).
 MLINE_TOL = 0.12                # How close to the m-line counts as "on" it (m).
 LEAVE_MARGIN = 0.10             # Must be this much closer to goal than the hit point (m).
-CLEAR_ITERS_TO_LEAVE = 8        # Fallback: leave after this many consecutive clear iterations.
+CLEAR_ITERS_TO_LEAVE = 15       # Fallback: leave after this many consecutive clear iterations.
 
 
 class BugNavigator:
