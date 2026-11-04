@@ -1,0 +1,9 @@
+# Python ignores
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+
+# Simulator output
+sim/out/

@@ -3,7 +3,7 @@
 Autonomous navigation for the MBot-Omni: drive to a goal pose while avoiding
 obstacles with a Bug 2 algorithm. See the [project instructions](https://hellorob.org/projects/p2).
 
-**Project webpage (P2.5):** https://howard-f35.github.io/Bug-Navigation/
+**Project webpage (P2.5):** https://jacobmonroe2.github.io/Bug-Navigation/
 (source in [`docs/index.html`](docs/index.html); enable GitHub Pages from the
 `docs/` folder in the repository settings to publish it).
 

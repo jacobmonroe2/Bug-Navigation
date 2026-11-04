@@ -7,3 +7,6 @@ __pycache__/
 
 # Simulator output
 sim/out/
+
+# Packaged copies
+*.zip
