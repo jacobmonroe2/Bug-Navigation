@@ -12,8 +12,8 @@ obstacles with a Bug 2 algorithm. See the [project instructions](https://helloro
 | File | Task | Description |
 |---|---|---|
 | [`hit_the_spot.py`](hit_the_spot.py) | P2.1 | `drive_to_pose()` and a demo that visits a sequence of goals, printing the pose at each |
-| [`bug_navigation.py`](bug_navigation.py) | P2.3, P2.4 | Bug 2 navigation state machine; prompts for a goal and prints the state every iteration |
-| [`utils.py`](utils.py) | | Shared helpers: `wrap_angle`, `find_min_ray_in_slice`, Project 1 `find_min_dist`, etc. |
+| [`bug_navigation.py`](bug_navigation.py) | P2.3, P2.4 | Bug 2 navigation state machine; prompts for a goal, prints the state every iteration, stops if the goal is unreachable |
+| [`utils.py`](utils.py) | | Shared helpers: `wrap_angle`, `find_min_ray_in_slice`, `StallBooster`, etc. |
 | [`DESIGN.md`](DESIGN.md) | P2.2 | Algorithm description with pseudocode and state machine diagram |
 | [`docs/index.html`](docs/index.html) | P2.5 | Project webpage |
 | [`sim/`](sim/) | | Offline 2D simulator used to test the code without the robot |
@@ -50,15 +50,22 @@ iteration, stop the robot on exit (including Ctrl+C) and print the final odometr
 ## Testing without the robot
 
 `sim/run_sim.py` substitutes a small 2D simulator for `mbot_bridge.api.MBot`
-and runs the real navigation code against a few test worlds (box, wall, two
-boxes, corridor, U-shaped trap):
+and runs the real navigation code. It has an ideal robot and a realistic one
+modelled on the real MBot: wheels that stall at low speed, noisy Lidar and
+communication delay.
+
+Run every scenario with both robot models:
 
 ```bash
 python3 sim/run_sim.py all
 ```
 
+Watch a single run with the full state printout. Add `--real` for the realistic robot:
+
 ```bash
-python3 sim/run_sim.py bug u_trap 2.5 0 0
+python3 sim/run_sim.py bug small_room 1.3 0 0 --real
 ```
 
-ASCII maps of each run are written to `sim/out/`.
+Test worlds: `empty`, `box`, `wall`, `two_boxes`, `corridor`, `u_trap`,
+`small_room`, `narrow_gap`, `blocked_door`, `cluttered`. ASCII maps of each run
+are written to `sim/out/`.

@@ -37,59 +37,82 @@
   <div class="video">Demo video coming soon: the robot navigating around obstacles to a staff-given goal.</div>
 
   <h2>What the robot does</h2>
-  <p>The robot is given a goal pose <em>(x, y, θ)</em> in its odometry frame and has to drive there
-    on its own, going around anything in the way. We implemented a <strong>Bug 2</strong> algorithm:
-    drive straight at the goal along the <em>m-line</em>; when the Lidar shows an obstacle in the way,
-    follow the obstacle's boundary; leave the boundary once the robot is back on the m-line and closer
-    to the goal than where it first hit the obstacle. Because the MBot-Omni can move in any direction,
-    the robot translates without turning and only rotates to the goal heading at the very end.</p>
+  <p>The robot is given a goal pose <em>(x, y, θ)</em> measured from where it starts and has to drive
+    there on its own, going around anything in the way. It has no map: only its wheel odometry, its
+    current Lidar scan and the goal. We implemented a <strong>Bug 2</strong> algorithm. The robot drives
+    along the <em>m-line</em>, the straight line from start to goal. When the Lidar shows an obstacle in
+    the way, it follows the obstacle's edge. Once it is back on the m-line and closer to the goal than
+    where it hit the obstacle, it leaves the obstacle and carries on along the line. Because the
+    MBot-Omni can move in any direction, it translates without turning and only rotates to the goal
+    heading at the very end.</p>
 
   <h2>State machine</h2>
   <pre>
-                 blocked                        back on m-line &amp; closer &amp; clear
- +---------------+ ----------&gt; +-------------+ -------------------------------+
- | DRIVE_TO_GOAL |             | FOLLOW_WALL |                                |
- +---------------+ &lt;---------- +-------------+ &lt;------------------------------+
+                     blocked                       back on m-line &amp; closer
+ +---------------+ ------------&gt; +-------------+ -------------------------+
+ | DRIVE_TO_GOAL |               | FOLLOW_WALL |                          |
+ +---------------+ &lt;------------ +-------------+ &lt;------------------------+
+        |                               |
+        | at goal position              | back at the hit point after
+        v                               v going all the way around
+ +---------------+                +------------------+
+ | TURN_TO_GOAL  |                | GOAL_UNREACHABLE |
+ +---------------+                +------------------+
         |
-        | dist &lt; POS_TOL
+        | heading correct
         v
- +---------------+  |heading err| &lt; ANG_TOL  +----------+
- | TURN_TO_GOAL  | --------------------------&gt; | AT_GOAL |
- +---------------+                             +----------+</pre>
+ +---------------+
+ |    AT_GOAL    |
+ +---------------+</pre>
   <table>
     <tr><th>State</th><th>Behaviour</th></tr>
-    <tr><td>0 · DRIVE_TO_GOAL</td><td>Proportional control on the position error, moving straight at the goal.</td></tr>
-    <tr><td>1 · FOLLOW_WALL</td><td>Project 1 wall follower: travel tangent to the nearest Lidar ray while holding a 0.35 m stand-off.</td></tr>
+    <tr><td>0 · DRIVE_TO_GOAL</td><td>Travel along the m-line toward the goal at 0.25 to 0.35 m/s.</td></tr>
+    <tr><td>1 · FOLLOW_WALL</td><td>Project 1 wall follower: travel along the obstacle's edge while holding a 0.27 m gap.</td></tr>
     <tr><td>2 · TURN_TO_GOAL</td><td>Rotate in place to the requested heading.</td></tr>
     <tr><td>3 · AT_GOAL</td><td>Stop and print the final odometry.</td></tr>
+    <tr><td>4 · GOAL_UNREACHABLE</td><td>Went all the way around the obstacle without finding a way through, so stop.</td></tr>
   </table>
-  <p>The state is printed every control iteration together with the pose, the distance to the goal
-    and the shortest Lidar ray toward the goal, so transitions can be verified from the terminal.</p>
+  <p>The state is printed every control iteration together with the time, the pose, the distance to
+    the goal and the shortest Lidar ray in the direction of travel, so transitions can be checked
+    from the terminal.</p>
 
   <h2>Detecting obstacles</h2>
-  <p>Checking only the single Lidar ray pointing at the goal misses obstacles that sit just beside
-    that ray. Instead we take the <em>minimum ray inside a 70° slice</em> centred on the goal
-    direction. If that ray is shorter than 0.45 m (and shorter than the distance to the goal, so the
-    object is actually between us and the goal) the goal direction is blocked and the robot switches to
-    wall following. When the robot hits an obstacle it also checks which side of the goal direction the
-    closest ray is on and goes around the other way, so it does not take the long way around.</p>
+  <p>Checking only the single Lidar ray pointing where the robot is heading misses obstacles that sit
+    just beside that ray. Instead we take the <em>minimum ray inside a 70° slice</em> centred on the
+    direction of travel. If that ray is shorter than 0.40 m, and shorter than the distance to the goal
+    so the object is really between us and the goal, the way is blocked and the robot switches to wall
+    following. It goes around on the side away from the closest ray, so it does not take the long way
+    around an off-centre box.</p>
 
   <h2>Discussion</h2>
   <ul>
+    <li><strong>What the real robot taught us.</strong> Our first version passed every simulated test but
+      barely moved on the MBot. The log showed the wheels do not turn at all for commands under about
+      0.25 m/s, and the controller slowed to exactly those speeds near obstacles and near the goal. We
+      changed it so the robot either moves at 0.25 to 0.35 m/s or stops, never crawls. On top of that,
+      a stall check watches the odometry. If the robot is told to move but is not moving, it turns the
+      command up in steps until it does.</li>
+    <li><strong>Getting back on the line.</strong> After going around a box, the early version drove
+      straight at the goal from wherever it was, which made a Y-shaped path. Now the robot aims at a
+      point 0.10 m further along the m-line. Off the line, that pulls it back on, so it rejoins its
+      original path right behind the obstacle and finishes in a straight line.</li>
+    <li><strong>Following one obstacle at a time.</strong> The Project 1 wall follower treats the
+      nearest Lidar ray as the wall. In a cluttered room the nearest ray keeps jumping between objects,
+      and the robot shuttled back and forth. We group Lidar points closer than 0.45 m into one obstacle,
+      since the robot cannot fit between them, and follow only the obstacle we started on.</li>
+    <li><strong>Knowing when to give up.</strong> If the robot comes back to where it first hit the
+      obstacle, there is no way around it to the goal, for example when the goal is outside the room. It
+      stops in <code>GOAL_UNREACHABLE</code> instead of circling forever.</li>
     <li><strong>Bug 2 vs. Bug 1.</strong> Bug 1 circles every obstacle completely before leaving at the
       closest point, which is safe but slow. Bug 2 leaves as soon as the m-line is re-crossed closer to
-      the goal, which gives much shorter paths on the convex boxes used in the demo course.</li>
-    <li><strong>Odometry drift.</strong> Everything is in the odometry frame, so wheel slip during wall
-      following shifts where the robot believes the m-line is. We widened the m-line tolerance and added a
-      fallback leave rule (clear line of sight to the goal and closer than the hit point for several
-      consecutive iterations) so the robot never orbits an obstacle forever.</li>
-    <li><strong>Inside corners.</strong> The wall follower uses the single nearest ray as "the wall". At
-      inside corners the nearest ray jumps from one surface to the next; slowing down when a surface
-      appears in the direction of travel made that hand-off smooth.</li>
-    <li><strong>Testing without the robot.</strong> We wrote a small 2D simulator with ray-cast Lidar
-      (<code>sim/run_sim.py</code>) and ran the exact navigation code against boxes, walls, a corridor and a
-      U-shaped trap. All scenarios reach the goal within 6 cm and 0.08 rad without collisions, and the
-      printed state sequence matches the state machine above.</li>
+      the goal, which gives much shorter paths on the boxes used in the demo course.</li>
+    <li><strong>Testing without the robot.</strong> We wrote a 2D simulator with ray-cast Lidar
+      (<code>sim/run_sim.py</code>) and a "realistic" robot model built from our robot's logs: wheels
+      that stall at low speed, noisy Lidar and communication delay. The navigation code reaches the goal
+      in all 9 reachable test worlds with both robot models, without collisions, and correctly gives up on
+      the 2 unreachable ones. Across 12 different robot variations it still sometimes gives up too early
+      in a narrow doorway or a very cluttered room when the Lidar is noisy, which is the main thing we
+      would improve next.</li>
   </ul>
 </main>
 </body>
