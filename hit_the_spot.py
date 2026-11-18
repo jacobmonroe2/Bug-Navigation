@@ -1,23 +1,28 @@
+import sys
 import time
 import math
-import numpy as np
 from mbot_bridge.api import MBot
 
-from utils import wrap_angle, clamp, apply_min_speed, world_to_robot, format_pose
+from utils import wrap_angle, clamp, world_to_robot, format_pose, StallBooster
 
 # ---------------------------------------------------------------------------
 # Controller parameters
 # ---------------------------------------------------------------------------
-KP_LIN = 1.0           # Proportional gain on position error (1/s).
-KP_ANG = 1.5           # Proportional gain on heading error (1/s).
-MAX_LIN_SPEED = 0.4    # Max translational speed (m/s).
-MAX_ANG_SPEED = 1.5    # Max rotational speed (rad/s).
-MIN_LIN_SPEED = 0.08   # Smallest command the motors actually move at (m/s).
-MIN_ANG_SPEED = 0.25   # Smallest rotation command the motors move at (rad/s).
-POS_TOLERANCE = 0.05   # "Reached" when within this distance of the goal (m).
-ANG_TOLERANCE = 0.08   # "Reached" when within this heading error (rad), ~4.5 deg.
-LOOP_PERIOD = 0.05     # Control loop period (s).
-TIMEOUT = 60.0         # Give up on a goal after this many seconds.
+KP_LIN = 1.5              # Proportional gain on position error (1/s).
+KP_ANG = 2.0              # Proportional gain on heading error (1/s).
+MAX_LIN_SPEED = 0.35      # Max translational speed (m/s).
+MAX_ANG_SPEED = 1.5       # Max rotational speed (rad/s).
+# On the real robot the wheels do not turn at all for small commands, so any
+# non-zero command is at least this big. If the robot still does not move, the
+# StallBooster turns the command up until it does.
+MIN_LIN_SPEED = 0.25      # (m/s)
+MIN_ANG_SPEED = 0.6       # (rad/s)
+HARD_MAX_LIN_SPEED = 0.55 # Absolute cap, even when boosted (m/s).
+HARD_MAX_ANG_SPEED = 3.0  # Absolute cap, even when boosted (rad/s).
+POS_TOLERANCE = 0.08      # "Reached" when within this distance of the goal (m).
+ANG_TOLERANCE = 0.10      # "Reached" when within this heading error (rad), ~6 deg.
+LOOP_PERIOD = 0.05        # Control loop period (s).
+TIMEOUT = 60.0            # Give up on a goal after this many seconds.
 
 
 def compute_velocity(pose, goal_x, goal_y, goal_theta):
@@ -42,24 +47,22 @@ def compute_velocity(pose, goal_x, goal_y, goal_theta):
     ex, ey = world_to_robot(dx, dy, theta)
 
     # Proportional control on position: command a speed proportional to the
-    # distance, pointing along the error vector, with a speed cap.
-    speed = clamp(KP_LIN * dist, 0.0, MAX_LIN_SPEED)
+    # distance, pointing along the error vector, between the minimum speed
+    # the motors respond to and the speed limit.
     if dist < POS_TOLERANCE:
-        speed = 0.0
+        vx, vy = 0.0, 0.0
     else:
-        speed = max(speed, MIN_LIN_SPEED)
-    if dist > 1e-6:
+        speed = clamp(KP_LIN * dist, MIN_LIN_SPEED, MAX_LIN_SPEED)
         vx = speed * ex / dist
         vy = speed * ey / dist
-    else:
-        vx, vy = 0.0, 0.0
 
     # Proportional control on heading.
-    wz = clamp(KP_ANG * angle_error, -MAX_ANG_SPEED, MAX_ANG_SPEED)
     if abs(angle_error) < ANG_TOLERANCE:
         wz = 0.0
     else:
-        wz = apply_min_speed(wz, MIN_ANG_SPEED)
+        wz = clamp(KP_ANG * angle_error, -MAX_ANG_SPEED, MAX_ANG_SPEED)
+        if abs(wz) < MIN_ANG_SPEED:
+            wz = math.copysign(MIN_ANG_SPEED, angle_error)
 
     return vx, vy, wz, dist, angle_error
 
@@ -81,9 +84,15 @@ def drive_to_pose(goal_x, goal_y, goal_theta, robot):
     goal_theta = wrap_angle(goal_theta)
     print(f"\n==> Driving to goal: x={goal_x:+.3f}  y={goal_y:+.3f}  theta={goal_theta:+.3f}")
 
+    # Separate stall watchers for driving and for turning on the spot.
+    move_booster = StallBooster(watch_position=True, watch_heading=False)
+    turn_booster = StallBooster(watch_position=False, watch_heading=True, max_boost=4.0)
+    was_translating = was_turning = False
+
     start_time = time.time()
     pose = robot.read_odometry()
     while True:
+        now = time.time() - start_time
         pose = robot.read_odometry()
         if len(pose) < 3:
             # Odometry not available this iteration; hold still and retry.
@@ -98,10 +107,23 @@ def drive_to_pose(goal_x, goal_y, goal_theta, robot):
             robot.stop()
             break
 
-        if time.time() - start_time > TIMEOUT:
-            print("    WARNING: timed out before reaching the goal.")
+        if now > TIMEOUT:
+            print("\n    WARNING: timed out before reaching the goal.")
             robot.stop()
             break
+
+        # Turn the command up if the robot was told to move and did not.
+        translating = math.hypot(vx, vy) > 1e-6
+        turning = (not translating) and abs(wz) > 1e-6
+        move_boost = move_booster.update(pose, translating and was_translating, now)
+        turn_boost = turn_booster.update(pose, turning and was_turning, now)
+        was_translating, was_turning = translating, turning
+        if translating:
+            speed = math.hypot(vx, vy)
+            target = min(HARD_MAX_LIN_SPEED, speed * move_boost)
+            vx, vy = vx / speed * target, vy / speed * target
+        elif turning:
+            wz = clamp(wz * turn_boost, -HARD_MAX_ANG_SPEED, HARD_MAX_ANG_SPEED)
 
         robot.drive(vx, vy, wz)
         print(f"    {format_pose(pose)} | dist err {dist:.3f} m | ang err {angle_error:+.3f} rad "
@@ -120,7 +142,6 @@ if __name__ == "__main__":
     # frame (meters, meters, radians). Course staff can edit this list or pass
     # goals on the command line as x y theta triples, e.g.
     #   python3 hit_the_spot.py 1 0 0  1 1 1.57  0 0 0
-    import sys
     args = sys.argv[1:]
     if len(args) >= 3 and len(args) % 3 == 0:
         goals = [(float(args[i]), float(args[i + 1]), float(args[i + 2])) for i in range(0, len(args), 3)]
